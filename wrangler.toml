@@ -1,0 +1,12 @@
+name = "invoice-extractor"
+main = "src/index.js"
+compatibility_date = "2026-09-07"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "invoice-extractor-db"
+database_id = "0fe54ce8-534a-4d60-9af8-180f685336df"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "invoice-extractor-files"
