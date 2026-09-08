@@ -96,7 +96,7 @@ async function handleUpload(request, env) {
   if (!file || typeof file === "string") {
     return new Response(JSON.stringify({ error: "Δεν βρέθηκε αρχείο" }), {
       status: 400,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=utf-8" },
     });
   }
 
@@ -104,7 +104,7 @@ async function handleUpload(request, env) {
   if (file.size > MAX_SIZE_BYTES) {
     return new Response(
       JSON.stringify({ error: "Το αρχείο είναι πολύ μεγάλο (όριο 10MB)" }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
+      { status: 400, headers: { "Content-Type": "application/json; charset=utf-8" } }
     );
   }
 
@@ -125,7 +125,7 @@ async function handleUpload(request, env) {
   } catch (err) {
     return new Response(
       JSON.stringify({ error: "Αποτυχία εξαγωγής", details: err.message }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+      { status: 500, headers: { "Content-Type": "application/json; charset=utf-8" } }
     );
   }
 
@@ -187,8 +187,71 @@ async function handleUpload(request, env) {
       validation_flag: validationFlag,
       extracted,
     }),
-    { headers: { "Content-Type": "application/json" } }
+    { headers: { "Content-Type": "application/json; charset=utf-8" } }
   );
+}
+
+async function handleGetInvoices(request, env) {
+  const workspaceId = "default"; // προσωρινό, θα γίνει δυναμικό αργότερα
+
+  const query = `
+    SELECT
+      i.id, i.workspace_id, i.supplier_name, i.supplier_tax_id,
+      i.invoice_number, i.invoice_date, i.currency,
+      i.subtotal, i.tax_amount, i.total_amount,
+      i.status, i.validation_flag, i.r2_key, i.created_at,
+      li.id AS line_id, li.description, li.quantity,
+      li.unit_price, li.line_total, li.confidence
+    FROM invoices i
+    LEFT JOIN line_items li ON li.invoice_id = i.id
+    WHERE i.workspace_id = ?
+    ORDER BY i.created_at DESC, li.id ASC
+  `;
+
+  const { results } = await env.DB.prepare(query).bind(workspaceId).all();
+
+  // Ομαδοποίηση: κάθε invoice_id -> ένα object με nested line_items array
+  const invoicesMap = new Map();
+
+  for (const row of results) {
+    if (!invoicesMap.has(row.id)) {
+      invoicesMap.set(row.id, {
+        id: row.id,
+        workspace_id: row.workspace_id,
+        supplier_name: row.supplier_name,
+        supplier_tax_id: row.supplier_tax_id,
+        invoice_number: row.invoice_number,
+        invoice_date: row.invoice_date,
+        currency: row.currency,
+        subtotal: row.subtotal,
+        tax_amount: row.tax_amount,
+        total_amount: row.total_amount,
+        status: row.status,
+        validation_flag: row.validation_flag,
+        r2_key: row.r2_key,
+        created_at: row.created_at,
+        line_items: [],
+      });
+    }
+
+    // Αν υπάρχει line item (LEFT JOIN μπορεί να δώσει NULL αν το invoice δεν έχει items)
+    if (row.line_id !== null) {
+      invoicesMap.get(row.id).line_items.push({
+        id: row.line_id,
+        description: row.description,
+        quantity: row.quantity,
+        unit_price: row.unit_price,
+        line_total: row.line_total,
+        confidence: row.confidence,
+      });
+    }
+  }
+
+  const invoices = Array.from(invoicesMap.values());
+
+  return new Response(JSON.stringify({ invoices }), {
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+  });
 }
 
 export default {
@@ -208,12 +271,18 @@ export default {
     if (url.pathname === "/health") {
       return new Response(
         JSON.stringify({ status: "ok", service: "invoice-extractor" }),
-        { headers: { "Content-Type": "application/json" } }
+        { headers: { "Content-Type": "application/json; charset=utf-8" } }
       );
     }
 
     if (url.pathname === "/upload" && request.method === "POST") {
       const response = await handleUpload(request, env);
+      response.headers.set("Access-Control-Allow-Origin", "*");
+      return response;
+    }
+
+    if (url.pathname === "/invoices" && request.method === "GET") {
+      const response = await handleGetInvoices(request, env);
       response.headers.set("Access-Control-Allow-Origin", "*");
       return response;
     }
