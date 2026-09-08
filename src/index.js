@@ -138,11 +138,12 @@ async function handleUpload(request, env) {
     }
   }
 
-  // 4. Έλεγχος διπλότυπου
+  // 4. Έλεγχος διπλότυπου (μόνο invoice_number + total_amount, όχι supplier_name γιατί το Gemini
+  // δεν είναι πάντα συνεπές στην εξαγωγή ονόματος προμηθευτή π.χ. "Μ.Ι.Κ.Ε." vs "M I K E")
   const existing = await env.DB.prepare(
-    `SELECT id FROM invoices WHERE workspace_id = ? AND supplier_name = ? AND invoice_number = ? AND total_amount = ?`
+    `SELECT id FROM invoices WHERE workspace_id = ? AND invoice_number = ? AND total_amount = ?`
   )
-    .bind(workspaceId, extracted.supplier_name, extracted.invoice_number, extracted.total_amount)
+    .bind(workspaceId, extracted.invoice_number, extracted.total_amount)
     .first();
 
   if (existing) {
