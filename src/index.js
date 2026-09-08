@@ -255,6 +255,29 @@ async function handleGetInvoices(request, env) {
   });
 }
 
+async function handleDeleteInvoice(invoiceId, env) {
+  // Πρώτα διαγράφουμε τα line items (το D1/SQLite δεν επιβάλλει foreign key
+  // constraints αυτόματα, άρα πρέπει να το κάνουμε ρητά εμείς)
+  await env.DB.prepare(`DELETE FROM line_items WHERE invoice_id = ?`)
+    .bind(invoiceId)
+    .run();
+
+  const result = await env.DB.prepare(`DELETE FROM invoices WHERE id = ?`)
+    .bind(invoiceId)
+    .run();
+
+  if (result.meta.changes === 0) {
+    return new Response(JSON.stringify({ error: "Το τιμολόγιο δεν βρέθηκε" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  }
+
+  return new Response(JSON.stringify({ deleted: true, invoice_id: invoiceId }), {
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+  });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -263,7 +286,7 @@ export default {
       return new Response(null, {
         headers: {
           "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+          "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type",
         },
       });
@@ -284,6 +307,14 @@ export default {
 
     if (url.pathname === "/invoices" && request.method === "GET") {
       const response = await handleGetInvoices(request, env);
+      response.headers.set("Access-Control-Allow-Origin", "*");
+      return response;
+    }
+
+    const deleteMatch = url.pathname.match(/^\/invoices\/(\d+)$/);
+    if (deleteMatch && request.method === "DELETE") {
+      const invoiceId = parseInt(deleteMatch[1], 10);
+      const response = await handleDeleteInvoice(invoiceId, env);
       response.headers.set("Access-Control-Allow-Origin", "*");
       return response;
     }
