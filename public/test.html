@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="UTF-8">
+  <title>Test Upload</title>
+  <style>
+    body { font-family: sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; }
+    pre { background: #f4f4f4; padding: 15px; overflow-x: auto; white-space: pre-wrap; }
+    button { padding: 8px 16px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h2>Test Upload - Invoice Extractor</h2>
+  <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg">
+  <button id="uploadBtn">Ανέβασμα</button>
+  <p id="status"></p>
+  <pre id="result"></pre>
+
+  <script>
+    document.getElementById("uploadBtn").addEventListener("click", async () => {
+      const fileInput = document.getElementById("fileInput");
+      const status = document.getElementById("status");
+      const result = document.getElementById("result");
+
+      if (!fileInput.files.length) {
+        status.textContent = "Διάλεξε πρώτα ένα αρχείο.";
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("file", fileInput.files[0]);
+
+      status.textContent = "Ανεβάζει και επεξεργάζεται...";
+      result.textContent = "";
+
+      try {
+        const response = await fetch("http://127.0.0.1:8787/upload", {
+          method: "POST",
+          body: formData,
+        });
+        const data = await response.json();
+        status.textContent = response.ok ? "Ολοκληρώθηκε." : "Σφάλμα.";
+        result.textContent = JSON.stringify(data, null, 2);
+      } catch (err) {
+        status.textContent = "Σφάλμα δικτύου.";
+        result.textContent = err.message;
+      }
+    });
+  </script>
+</body>
+</html>

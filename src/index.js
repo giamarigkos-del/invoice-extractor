@@ -26,10 +26,11 @@ const EXTRACTION_PROMPT = `Είσαι ειδικός στην εξαγωγή δ�
 - Αν ένα πεδίο δεν είναι ξεκάθαρο ή δεν υπάρχει, βάλε null. Ποτέ μην μαντεύεις.
 - Αν δεν υπάρχουν ξεχωριστές γραμμές προϊόντων, βάλε ένα line item με description "Γενικό σύνολο" και line_total ίσο με το total_amount.
 - Το νόμισμα προσδιόρισέ το από σύμβολα (€, $) ή κωδικούς. Αν δεν είναι ξεκάθαρο, υπόθεσε EUR.
-- Δώσε confidence "low" αν η εικόνα είναι θολή, περικομμένη ή δυσανάγνωστη.`;
+- Δώσε confidence "low" αν η εικόνα είναι θολή, περικομμένη ή δυσανάγνωστη.
+- Το unit_price και το line_total πρέπει να είναι ΣΥΝΕΠΗ μεταξύ τους ως προς το αν περιλαμβάνουν ΦΠΑ ή όχι. Προτίμησε να είναι ΚΑΙ ΤΑ ΔΥΟ χωρίς ΦΠΑ (καθαρές τιμές), ώστε line_total = quantity × unit_price να ισχύει πάντα. Το ΦΠΑ υπολογίζεται ξεχωριστά μόνο στο tax_amount του συνόλου του τιμολογίου.`;
 
-async function callGemini(env, base64Data, mimeType) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${env.GEMINI_API_KEY}`;
+async function callGeminiWithModel(env, base64Data, mimeType, model) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
 
   const body = {
     contents: [
@@ -53,7 +54,9 @@ async function callGemini(env, base64Data, mimeType) {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Gemini API error: ${response.status} ${errorText}`);
+    const error = new Error(`Gemini API error: ${response.status} ${errorText}`);
+    error.status = response.status;
+    throw error;
   }
 
   const data = await response.json();
@@ -64,6 +67,17 @@ async function callGemini(env, base64Data, mimeType) {
   }
 
   return JSON.parse(rawText);
+}
+
+async function callGemini(env, base64Data, mimeType) {
+  try {
+    return await callGeminiWithModel(env, base64Data, mimeType, "gemini-3.8-flash");
+  } catch (err) {
+    if (err.status === 503) {
+      return await callGeminiWithModel(env, base64Data, mimeType, "gemini-3.6-flash");
+    }
+    throw err;
+  }
 }
 
 function arrayBufferToBase64(buffer) {
@@ -181,7 +195,6 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // CORS, χρήσιμο για τοπικά tests από απλό HTML αρχείο
     if (request.method === "OPTIONS") {
       return new Response(null, {
         headers: {
