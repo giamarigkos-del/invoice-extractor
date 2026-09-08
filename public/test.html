@@ -31,12 +31,39 @@
       font-size: 14px;
     }
     button:hover { background: #1d4ed8; }
+    td:last-child { white-space: nowrap; }
+    td:last-child button { margin-right: 4px; margin-bottom: 4px; }
     button.delete-btn {
       background: #dc2626;
       padding: 4px 10px;
       font-size: 12px;
     }
     button.delete-btn:hover { background: #b91c1c; }
+    button.edit-btn, button.file-btn, button.cancel-btn {
+      background: #6b7280;
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+    button.edit-btn:hover, button.file-btn:hover, button.cancel-btn:hover { background: #4b5563; }
+    button.confirm-btn {
+      background: #16a34a;
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+    button.confirm-btn:hover { background: #15803d; }
+    button.save-btn {
+      background: #2563eb;
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+    .edit-field {
+      width: 100%;
+      padding: 3px 5px;
+      font-size: 13px;
+      border: 1px solid #d1d5db;
+      border-radius: 3px;
+      box-sizing: border-box;
+    }
     button:disabled { background: #9ca3af; cursor: not-allowed; }
     #status { font-style: italic; color: #555; min-height: 20px; }
     table {
@@ -88,6 +115,9 @@
       return flag;
     }
 
+    // Ποια γραμμή είναι αυτή τη στιγμή σε λειτουργία επεξεργασίας (μόνο μία τη φορά, απλότητα)
+    let editingId = null;
+
     function renderInvoices(invoices) {
       const container = document.getElementById("invoicesContainer");
 
@@ -101,16 +131,46 @@
           `<li>${li.description} — ${li.quantity ?? "?"} × ${li.unit_price ?? "?"}€ = ${li.line_total}€</li>`
         ).join("");
 
+        const isEditing = editingId === inv.id;
+
+        const supplierCell = isEditing
+          ? `<input type="text" class="edit-field" data-field="supplier_name" value="${(inv.supplier_name || "").replace(/"/g, "&quot;")}">`
+          : (inv.supplier_name || "—");
+
+        const numberCell = isEditing
+          ? `<input type="text" class="edit-field" data-field="invoice_number" value="${(inv.invoice_number || "").replace(/"/g, "&quot;")}">`
+          : (inv.invoice_number || "—");
+
+        const dateCell = isEditing
+          ? `<input type="date" class="edit-field" data-field="invoice_date" value="${inv.invoice_date || ""}">`
+          : (inv.invoice_date || "—");
+
+        const totalCell = isEditing
+          ? `<input type="number" step="0.01" class="edit-field" data-field="total_amount" value="${inv.total_amount}" style="width:80px">`
+          : `${inv.total_amount} ${inv.currency}`;
+
+        const actionButtons = isEditing
+          ? `
+            <button class="save-btn" data-id="${inv.id}">Αποθήκευση</button>
+            <button class="cancel-btn">Άκυρο</button>
+          `
+          : `
+            <button class="edit-btn" data-id="${inv.id}">Επεξεργασία</button>
+            <button class="file-btn" data-id="${inv.id}">Αρχείο</button>
+            ${inv.validation_flag !== "ok" ? `<button class="confirm-btn" data-id="${inv.id}">Επιβεβαίωση OK</button>` : ""}
+            <button class="delete-btn" data-id="${inv.id}">Διαγραφή</button>
+          `;
+
         return `
-          <tr>
+          <tr data-row-id="${inv.id}">
             <td>${inv.id}</td>
-            <td>${inv.supplier_name || "—"}</td>
-            <td>${inv.invoice_number || "—"}</td>
-            <td>${inv.invoice_date || "—"}</td>
-            <td class="total">${inv.total_amount} ${inv.currency}</td>
+            <td>${supplierCell}</td>
+            <td>${numberCell}</td>
+            <td>${dateCell}</td>
+            <td class="total">${totalCell}</td>
             <td>${flagLabel(inv.validation_flag)}</td>
             <td><ul class="line-items">${itemsHtml}</ul></td>
-            <td><button class="delete-btn" data-id="${inv.id}">Διαγραφή</button></td>
+            <td>${actionButtons}</td>
           </tr>
         `;
       }).join("");
@@ -136,6 +196,73 @@
       container.querySelectorAll(".delete-btn").forEach(btn => {
         btn.addEventListener("click", () => deleteInvoice(btn.dataset.id));
       });
+      container.querySelectorAll(".edit-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          editingId = parseInt(btn.dataset.id, 10);
+          loadInvoices();
+        });
+      });
+      container.querySelectorAll(".cancel-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          editingId = null;
+          loadInvoices();
+        });
+      });
+      container.querySelectorAll(".save-btn").forEach(btn => {
+        btn.addEventListener("click", () => saveInvoice(btn.dataset.id));
+      });
+      container.querySelectorAll(".file-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          window.open(`${API_BASE}/invoices/${btn.dataset.id}/file`, "_blank");
+        });
+      });
+      container.querySelectorAll(".confirm-btn").forEach(btn => {
+        btn.addEventListener("click", () => confirmOk(btn.dataset.id));
+      });
+    }
+
+    async function saveInvoice(id) {
+      const row = document.querySelector(`tr[data-row-id="${id}"]`);
+      const fields = {};
+      row.querySelectorAll(".edit-field").forEach(input => {
+        const field = input.dataset.field;
+        fields[field] = field === "total_amount" ? parseFloat(input.value) : input.value;
+      });
+
+      try {
+        const response = await fetch(`${API_BASE}/invoices/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json; charset=utf-8" },
+          body: JSON.stringify(fields),
+        });
+        if (!response.ok) {
+          const err = await response.json();
+          alert(`Σφάλμα: ${err.error}`);
+          return;
+        }
+        editingId = null;
+        await loadInvoices();
+      } catch (err) {
+        alert(`Σφάλμα δικτύου: ${err.message}`);
+      }
+    }
+
+    async function confirmOk(id) {
+      try {
+        const response = await fetch(`${API_BASE}/invoices/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json; charset=utf-8" },
+          body: JSON.stringify({ validation_flag: "ok" }),
+        });
+        if (!response.ok) {
+          const err = await response.json();
+          alert(`Σφάλμα: ${err.error}`);
+          return;
+        }
+        await loadInvoices();
+      } catch (err) {
+        alert(`Σφάλμα δικτύου: ${err.message}`);
+      }
     }
 
     async function loadInvoices() {

@@ -278,6 +278,94 @@ async function handleDeleteInvoice(invoiceId, env) {
   });
 }
 
+const PATCHABLE_FIELDS = [
+  "supplier_name",
+  "supplier_tax_id",
+  "invoice_number",
+  "invoice_date",
+  "currency",
+  "subtotal",
+  "tax_amount",
+  "total_amount",
+  "validation_flag",
+  "status",
+];
+
+async function handlePatchInvoice(invoiceId, request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return new Response(JSON.stringify({ error: "Μη έγκυρο JSON σώμα αιτήματος" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  }
+
+  // Κρατάμε μόνο τα πεδία που επιτρέπεται να αλλάξουν, αγνοούμε οτιδήποτε άλλο
+  // στάλθηκε (π.χ. id, r2_key, created_at δεν πρέπει να αλλάζουν από εδώ)
+  const fieldsToUpdate = Object.keys(body).filter((key) => PATCHABLE_FIELDS.includes(key));
+
+  if (fieldsToUpdate.length === 0) {
+    return new Response(
+      JSON.stringify({ error: "Δεν στάλθηκε κανένα έγκυρο πεδίο προς ενημέρωση" }),
+      { status: 400, headers: { "Content-Type": "application/json; charset=utf-8" } }
+    );
+  }
+
+  const setClause = fieldsToUpdate.map((field) => `${field} = ?`).join(", ");
+  const values = fieldsToUpdate.map((field) => body[field]);
+
+  const result = await env.DB.prepare(
+    `UPDATE invoices SET ${setClause} WHERE id = ?`
+  )
+    .bind(...values, invoiceId)
+    .run();
+
+  if (result.meta.changes === 0) {
+    return new Response(JSON.stringify({ error: "Το τιμολόγιο δεν βρέθηκε" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  }
+
+  const updated = await env.DB.prepare(`SELECT * FROM invoices WHERE id = ?`)
+    .bind(invoiceId)
+    .first();
+
+  return new Response(JSON.stringify({ updated: true, invoice: updated }), {
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+  });
+}
+
+async function handleGetInvoiceFile(invoiceId, env) {
+  const invoice = await env.DB.prepare(`SELECT r2_key FROM invoices WHERE id = ?`)
+    .bind(invoiceId)
+    .first();
+
+  if (!invoice) {
+    return new Response(JSON.stringify({ error: "Το τιμολόγιο δεν βρέθηκε" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  }
+
+  const object = await env.FILES.get(invoice.r2_key);
+
+  if (!object) {
+    return new Response(JSON.stringify({ error: "Το αρχείο δεν βρέθηκε στο R2" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  }
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("Content-Disposition", "inline");
+
+  return new Response(object.body, { headers });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -286,7 +374,7 @@ export default {
       return new Response(null, {
         headers: {
           "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+          "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type",
         },
       });
@@ -311,10 +399,25 @@ export default {
       return response;
     }
 
-    const deleteMatch = url.pathname.match(/^\/invoices\/(\d+)$/);
-    if (deleteMatch && request.method === "DELETE") {
-      const invoiceId = parseInt(deleteMatch[1], 10);
+    const invoiceIdMatch = url.pathname.match(/^\/invoices\/(\d+)$/);
+    if (invoiceIdMatch && request.method === "DELETE") {
+      const invoiceId = parseInt(invoiceIdMatch[1], 10);
       const response = await handleDeleteInvoice(invoiceId, env);
+      response.headers.set("Access-Control-Allow-Origin", "*");
+      return response;
+    }
+
+    if (invoiceIdMatch && request.method === "PATCH") {
+      const invoiceId = parseInt(invoiceIdMatch[1], 10);
+      const response = await handlePatchInvoice(invoiceId, request, env);
+      response.headers.set("Access-Control-Allow-Origin", "*");
+      return response;
+    }
+
+    const fileMatch = url.pathname.match(/^\/invoices\/(\d+)\/file$/);
+    if (fileMatch && request.method === "GET") {
+      const invoiceId = parseInt(fileMatch[1], 10);
+      const response = await handleGetInvoiceFile(invoiceId, env);
       response.headers.set("Access-Control-Allow-Origin", "*");
       return response;
     }
