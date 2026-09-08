@@ -2,25 +2,172 @@
 <html lang="el">
 <head>
   <meta charset="UTF-8">
-  <title>Test Upload</title>
+  <title>Invoice Extractor</title>
   <style>
-    body { font-family: sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; }
-    pre { background: #f4f4f4; padding: 15px; overflow-x: auto; white-space: pre-wrap; }
-    button { padding: 8px 16px; cursor: pointer; }
+    body {
+      font-family: sans-serif;
+      max-width: 1000px;
+      margin: 40px auto;
+      padding: 0 20px;
+      color: #222;
+    }
+    h2 { margin-bottom: 4px; }
+    .upload-box {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 20px 0;
+      padding: 15px;
+      background: #f4f4f4;
+      border-radius: 6px;
+    }
+    button {
+      padding: 8px 16px;
+      cursor: pointer;
+      border: none;
+      border-radius: 4px;
+      background: #2563eb;
+      color: white;
+      font-size: 14px;
+    }
+    button:hover { background: #1d4ed8; }
+    button.delete-btn {
+      background: #dc2626;
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+    button.delete-btn:hover { background: #b91c1c; }
+    button:disabled { background: #9ca3af; cursor: not-allowed; }
+    #status { font-style: italic; color: #555; min-height: 20px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid #e5e7eb;
+      vertical-align: top;
+      font-size: 14px;
+    }
+    th { background: #f9fafb; }
+    .flag-ok { color: #16a34a; font-weight: bold; }
+    .flag-warn { color: #d97706; font-weight: bold; }
+    .line-items {
+      margin: 4px 0 0 0;
+      padding-left: 18px;
+      font-size: 12px;
+      color: #555;
+    }
+    .total { font-weight: bold; }
+    .empty { color: #888; font-style: italic; padding: 20px; text-align: center; }
   </style>
 </head>
 <body>
-  <h2>Test Upload - Invoice Extractor</h2>
-  <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg">
-  <button id="uploadBtn">Ανέβασμα</button>
-  <p id="status"></p>
-  <pre id="result"></pre>
+  <h2>Invoice Extractor</h2>
+
+  <div class="upload-box">
+    <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg">
+    <button id="uploadBtn">Ανέβασμα</button>
+    <span id="status"></span>
+  </div>
+
+  <h3>Τιμολόγια</h3>
+  <div id="invoicesContainer">
+    <p class="empty">Φόρτωση...</p>
+  </div>
 
   <script>
+    const API_BASE = "http://127.0.0.1:8787";
+
+    function flagLabel(flag) {
+      if (flag === "ok") return `<span class="flag-ok">OK</span>`;
+      if (flag === "math_mismatch") return `<span class="flag-warn">Ασυμφωνία ποσών</span>`;
+      if (flag === "possible_duplicate") return `<span class="flag-warn">Πιθανό διπλότυπο</span>`;
+      return flag;
+    }
+
+    function renderInvoices(invoices) {
+      const container = document.getElementById("invoicesContainer");
+
+      if (!invoices.length) {
+        container.innerHTML = `<p class="empty">Δεν υπάρχουν ακόμα τιμολόγια.</p>`;
+        return;
+      }
+
+      const rows = invoices.map(inv => {
+        const itemsHtml = inv.line_items.map(li =>
+          `<li>${li.description} — ${li.quantity ?? "?"} × ${li.unit_price ?? "?"}€ = ${li.line_total}€</li>`
+        ).join("");
+
+        return `
+          <tr>
+            <td>${inv.id}</td>
+            <td>${inv.supplier_name || "—"}</td>
+            <td>${inv.invoice_number || "—"}</td>
+            <td>${inv.invoice_date || "—"}</td>
+            <td class="total">${inv.total_amount} ${inv.currency}</td>
+            <td>${flagLabel(inv.validation_flag)}</td>
+            <td><ul class="line-items">${itemsHtml}</ul></td>
+            <td><button class="delete-btn" data-id="${inv.id}">Διαγραφή</button></td>
+          </tr>
+        `;
+      }).join("");
+
+      container.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Προμηθευτής</th>
+              <th>Αρ. Τιμολογίου</th>
+              <th>Ημερομηνία</th>
+              <th>Σύνολο</th>
+              <th>Έλεγχος</th>
+              <th>Είδη</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+
+      container.querySelectorAll(".delete-btn").forEach(btn => {
+        btn.addEventListener("click", () => deleteInvoice(btn.dataset.id));
+      });
+    }
+
+    async function loadInvoices() {
+      const container = document.getElementById("invoicesContainer");
+      try {
+        const response = await fetch(`${API_BASE}/invoices`);
+        const data = await response.json();
+        renderInvoices(data.invoices || []);
+      } catch (err) {
+        container.innerHTML = `<p class="empty">Σφάλμα φόρτωσης: ${err.message}</p>`;
+      }
+    }
+
+    async function deleteInvoice(id) {
+      if (!confirm(`Σίγουρα θέλεις να διαγράψεις το τιμολόγιο #${id};`)) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/invoices/${id}`, { method: "DELETE" });
+        if (!response.ok) {
+          const err = await response.json();
+          alert(`Σφάλμα: ${err.error}`);
+          return;
+        }
+        await loadInvoices();
+      } catch (err) {
+        alert(`Σφάλμα δικτύου: ${err.message}`);
+      }
+    }
+
     document.getElementById("uploadBtn").addEventListener("click", async () => {
       const fileInput = document.getElementById("fileInput");
       const status = document.getElementById("status");
-      const result = document.getElementById("result");
 
       if (!fileInput.files.length) {
         status.textContent = "Διάλεξε πρώτα ένα αρχείο.";
@@ -31,21 +178,30 @@
       formData.append("file", fileInput.files[0]);
 
       status.textContent = "Ανεβάζει και επεξεργάζεται...";
-      result.textContent = "";
+      document.getElementById("uploadBtn").disabled = true;
 
       try {
-        const response = await fetch("http://127.0.0.1:8787/upload", {
+        const response = await fetch(`${API_BASE}/upload`, {
           method: "POST",
           body: formData,
         });
         const data = await response.json();
-        status.textContent = response.ok ? "Ολοκληρώθηκε." : "Σφάλμα.";
-        result.textContent = JSON.stringify(data, null, 2);
+        status.textContent = response.ok
+          ? `Ολοκληρώθηκε (έλεγχος: ${data.validation_flag})`
+          : `Σφάλμα: ${data.error}`;
+
+        if (response.ok) {
+          fileInput.value = "";
+          await loadInvoices();
+        }
       } catch (err) {
-        status.textContent = "Σφάλμα δικτύου.";
-        result.textContent = err.message;
+        status.textContent = `Σφάλμα δικτύου: ${err.message}`;
+      } finally {
+        document.getElementById("uploadBtn").disabled = false;
       }
     });
+
+    loadInvoices();
   </script>
 </body>
 </html>
