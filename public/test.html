@@ -242,6 +242,7 @@
         }
         editingId = null;
         await loadInvoices();
+        clearUploadStatus();
       } catch (err) {
         alert(`Σφάλμα δικτύου: ${err.message}`);
       }
@@ -260,6 +261,7 @@
           return;
         }
         await loadInvoices();
+        clearUploadStatus();
       } catch (err) {
         alert(`Σφάλμα δικτύου: ${err.message}`);
       }
@@ -276,6 +278,10 @@
       }
     }
 
+    function clearUploadStatus() {
+      document.getElementById("status").textContent = "";
+    }
+
     async function deleteInvoice(id) {
       if (!confirm(`Σίγουρα θέλεις να διαγράψεις το τιμολόγιο #${id};`)) return;
 
@@ -287,6 +293,7 @@
           return;
         }
         await loadInvoices();
+        clearUploadStatus();
       } catch (err) {
         alert(`Σφάλμα δικτύου: ${err.message}`);
       }

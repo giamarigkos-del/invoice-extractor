@@ -1,6 +1,6 @@
 name = "invoice-extractor"
 main = "src/index.js"
-compatibility_date = "2026-09-07"
+compatibility_date = "2026-09-04"
 
 [[d1_databases]]
 binding = "DB"
